@@ -1,0 +1,6 @@
+{
+  "name": "متجر المتحدة للأدوات الكهربائية",
+  "description": "منصة التجارة الإلكترونية الشاملة لشركة المتحدة للأدوات والمهمات الكهربائية - كابلات، قواطع، إضاءة ولوازم التأسيس",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
