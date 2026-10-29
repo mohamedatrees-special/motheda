@@ -701,7 +701,7 @@ app.get('/api/health', (req, res) => {
     databaseEngine: db.pg.engineType,
     timestamp: new Date().toISOString(),
     productsCount: db.products.length,
-    ordersCount: db.orders.size,
+       ordersCount: db.orders.values().length,
     branchesCount: db.branches.length,
     zonesCount: db.deliveryZones.length,
   });
