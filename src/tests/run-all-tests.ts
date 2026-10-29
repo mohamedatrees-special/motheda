@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3';
 import crypto from 'crypto';
 import path from 'path';
+import { initializeDatabase } from '../server/db/database.ts';
 import { db } from '../server/db/store.ts';
 import { AuthService } from '../server/services/auth.service.ts';
 import { InventoryService } from '../server/services/inventory.service.ts';
@@ -25,6 +25,8 @@ function assert(condition: boolean, testName: string, details?: string) {
 }
 
 async function runTestSuite() {
+  await initializeDatabase();
+  await db.loadFromPostgres();
   console.log('\n======================================================');
   console.log('⚡ AL-MOTAHEDA ELECTRICAL SUPPLIES — REGRESSION & SECURITY SUITE');
   console.log('======================================================\n');
@@ -329,11 +331,11 @@ async function runTestSuite() {
     // Dynamically insert a fresh single-use recovery code for testing
     const testRecoveryCode = `MOTAHEDA-TEST-${Date.now()}`;
     const testRecoveryHash = crypto.createHash('sha256').update(testRecoveryCode).digest('hex');
-    const { sqlite } = await import('../server/db/database.ts');
-    sqlite.prepare(`
+    await db.pg.query(`
       INSERT INTO recovery_codes (id, username, code_hash, is_used, created_at)
-      VALUES (?, ?, ?, 0, ?)
-    `).run(`rec-test-${Date.now()}`, 'admin', testRecoveryHash, new Date().toISOString());
+      VALUES ($1, $2, $3, FALSE, $4)
+    `, [`rec-test-${Date.now()}`, 'admin', testRecoveryHash, new Date().toISOString()]);
+    await db.loadFromPostgres();
 
     const emergencyLogin1 = AuthService.verifyEmergencyRecoveryCode('admin', testRecoveryCode);
     assert(emergencyLogin1.success === true, 'Emergency recovery code grants administrative access on outage');
@@ -353,10 +355,11 @@ async function runTestSuite() {
     const testLockoutUser = `lockout_user_${Date.now()}`;
     const dummySalt = crypto.randomBytes(16).toString('hex');
     const dummyHash = crypto.pbkdf2Sync('CorrectPassword123!', dummySalt, 100000, 64, 'sha512').toString('hex');
-    sqlite.prepare(`
+    await db.pg.query(`
       INSERT INTO admin_users (id, username, password_hash, salt, full_name, role, phone, is_active, failed_login_attempts, locked_until)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0)
-    `).run(`usr-${Date.now()}`, testLockoutUser, dummyHash, dummySalt, 'مستخدم اختبار الحظر', 'SALES_AGENT', '01000000000');
+      VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, 0, 0)
+    `, [`usr-${Date.now()}`, testLockoutUser, dummyHash, dummySalt, 'مستخدم اختبار الحظر', 'SALES_AGENT', '01000000000']);
+    await db.loadFromPostgres();
 
     for (let i = 0; i < 5; i++) {
       AuthService.initiateAdminLogin(testLockoutUser, 'WrongPassword!');
@@ -369,26 +372,25 @@ async function runTestSuite() {
   }
 
   // -------------------------------------------------------------------
-  // 7. PERSISTENT SQL DATABASE & CONCURRENCY VERIFICATION (PHASE 3)
+  // 7. PERSISTENT POSTGRESQL DATABASE & CONCURRENCY VERIFICATION (PHASE 3)
   // -------------------------------------------------------------------
   console.log('\n💾 7. Testing Persistent Database & Concurrency Safety (Phase 3):');
   {
-    // Test direct persistent database connection
-    const dbPath = path.resolve(process.cwd(), 'data', 'almotaheda.db');
-    const freshDb = new Database(dbPath, { readonly: true });
+    // Test direct persistent PostgreSQL queries
+    const productRes = await db.pg.query('SELECT COUNT(*) as count FROM products');
+    const productCount = parseInt((productRes.rows[0] as any).count, 10);
+    assert(productCount >= 7, 'Persistent PostgreSQL database has all products stored in relational table');
 
-    const productRow = freshDb.prepare('SELECT COUNT(*) as count FROM products').get() as { count: number };
-    assert(productRow.count >= 7, 'Persistent SQLite database has all products stored on disk');
-
-    const ordersRow = freshDb.prepare('SELECT COUNT(*) as count FROM orders').get() as { count: number };
-    assert(ordersRow.count >= 1, 'Orders are persistently written to disk SQLite table');
-
-    freshDb.close();
+    const ordersRes = await db.pg.query('SELECT COUNT(*) as count FROM orders');
+    const ordersCount = parseInt((ordersRes.rows[0] as any).count, 10);
+    assert(ordersCount >= 1, 'Orders are persistently written to PostgreSQL orders table');
 
     // Concurrency test: Competing reservations on limited stock
-    // Set a test product stock to 1
+    // Set a test product stock to 1 in PostgreSQL
     const testItemId = 'prod-digital-multimeter-uni-t';
-    db.updateProductStock(testItemId, 1);
+    await db.pg.query("DELETE FROM inventory_reservations WHERE product_id = $1", [testItemId]);
+    await db.pg.query('UPDATE products SET stock_quantity = 1 WHERE id = $1', [testItemId]);
+    await db.loadFromPostgres();
 
     // Run two competing reservations for quantity 1 concurrently
     let successCount = 0;
@@ -408,7 +410,8 @@ async function runTestSuite() {
 
     // Clean up test reservation
     InventoryService.releaseOrderReservation('concurrent-ord-1', 'Clean up concurrency test');
-    db.updateProductStock(testItemId, 3);
+    await db.pg.query('UPDATE products SET stock_quantity = 3 WHERE id = $1', [testItemId]);
+    await db.loadFromPostgres();
   }
 
   console.log('\n======================================================');
@@ -418,6 +421,7 @@ async function runTestSuite() {
   if (failedTests > 0) {
     process.exit(1);
   }
+  process.exit(0);
 }
 
 runTestSuite().catch((err) => {

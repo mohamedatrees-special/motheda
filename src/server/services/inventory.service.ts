@@ -6,41 +6,45 @@ export class InventoryService {
 
   /**
    * Concurrency-safe atomic stock reservation
-   * Uses persistent SQLite transactions to ensure competing checkouts cannot oversell
+   * Uses persistent PostgreSQL transactions and row-level locks to ensure competing checkouts cannot oversell
    */
   public static async reserveStockForOrder(
     orderId: string,
     items: { productId: string; variantId?: string; quantity: number }[]
   ): Promise<InventoryReservation[]> {
-    return db.transaction(() => {
-      // First clean any expired reservations
+    return await db.pg.transaction(async (tx) => {
+      // Clean expired reservations in PostgreSQL
       InventoryService.cleanExpiredReservationsSync();
 
       const reservations: InventoryReservation[] = [];
       const expiresAt = new Date(Date.now() + InventoryService.RESERVATION_TTL_MS).toISOString();
 
-      // Check availability for all items under the lock
       for (const item of items) {
-        const product = db.getProductById(item.productId);
-        if (!product || !product.isActive) {
-          throw new Error(`المنتج غير موجود أو غير نشط بالمخزن.`);
+        // Row-level lock in PostgreSQL
+        const prodRes = await tx.query(
+          'SELECT id, title_ar, stock_quantity, variants_json, is_active FROM products WHERE id = $1 FOR UPDATE',
+          [item.productId]
+        );
+
+        if (prodRes.rows.length === 0 || !prodRes.rows[0].is_active) {
+          throw new Error('المنتج غير موجود أو غير نشط بالمخزن.');
         }
 
-        // Calculate currently active reserved quantity from persistent reservations
-        let activeReserved = 0;
-        for (const res of db.reservations.values()) {
-          if (
-            res.status === 'ACTIVE' &&
-            res.productId === item.productId &&
-            res.variantId === item.variantId
-          ) {
-            activeReserved += res.quantity;
-          }
-        }
+        const productRow = prodRes.rows[0];
 
-        let baseAvailable = product.stockQuantity;
-        if (item.variantId && product.variants) {
-          const variant = product.variants.find((v) => v.id === item.variantId);
+        // Query active reservations directly in PostgreSQL
+        const resQuery = await tx.query(
+          "SELECT COALESCE(SUM(quantity), 0) as reserved FROM inventory_reservations WHERE product_id = $1 AND status = 'ACTIVE' AND expires_at > NOW()",
+          [item.productId]
+        );
+        const activeReserved = parseInt((resQuery.rows[0] as any)?.reserved || '0', 10);
+
+        let baseAvailable = productRow.stock_quantity;
+        if (item.variantId) {
+          const variants = typeof productRow.variants_json === 'string'
+            ? JSON.parse(productRow.variants_json)
+            : (productRow.variants_json || []);
+          const variant = variants.find((v: any) => v.id === item.variantId);
           if (variant) {
             baseAvailable = variant.stockQuantity;
           }
@@ -50,13 +54,10 @@ export class InventoryService {
 
         if (effectiveAvailable < item.quantity) {
           throw new Error(
-            `عذراً، نفدت الكمية المتاحة من المنتج "${product.titleAr}". المتاح حالياً: ${Math.max(0, effectiveAvailable)} قطعة فقط.`
+            `عذراً، نفدت الكمية المتاحة من المنتج "${productRow.title_ar}". المتاح حالياً: ${Math.max(0, effectiveAvailable)} قطعة فقط.`
           );
         }
-      }
 
-      // If all items pass, create the reservations atomically in database
-      for (const item of items) {
         const resId = `res-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const reservation: InventoryReservation = {
           id: resId,
@@ -68,20 +69,31 @@ export class InventoryService {
           status: 'ACTIVE',
         };
 
-        db.reservations.set(resId, reservation);
-        reservations.push(reservation);
+        // Insert reservation in PostgreSQL transaction
+        await tx.query(
+          `INSERT INTO inventory_reservations (id, product_id, variant_id, order_id, quantity, expires_at, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [resId, item.productId, item.variantId || null, orderId, item.quantity, expiresAt, 'ACTIVE']
+        );
 
-        // Record persistent movement
-        db.addMovement({
-          id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          productId: item.productId,
-          type: 'RESERVATION',
-          quantity: item.quantity,
-          orderId,
-          reason: 'حجز مؤقت للطلب أثناء مرحلة الدفع والتحقق',
-          actor: 'CHECKOUT_SERVICE',
-          timestamp: new Date().toISOString(),
-        });
+        // Insert inventory movement
+        await tx.query(
+          `INSERT INTO inventory_movements (id, product_id, type, quantity, order_id, reason, actor, timestamp)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            item.productId,
+            'RESERVATION',
+            item.quantity,
+            orderId,
+            `حجز مؤقت للطلب أثناء مرحلة الدفع والتحقق: ${orderId}`,
+            'CHECKOUT_SERVICE',
+            new Date().toISOString()
+          ]
+        );
+
+        reservations.push(reservation);
+        db.reservations.set(resId, reservation);
       }
 
       return reservations;

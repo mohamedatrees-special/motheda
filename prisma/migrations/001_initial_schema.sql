@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS inventory_reservations (
   id VARCHAR(64) PRIMARY KEY,
   product_id VARCHAR(64) NOT NULL REFERENCES products(id),
   variant_id VARCHAR(64),
-  order_id VARCHAR(64) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  order_id VARCHAR(64) NOT NULL,
   quantity INT NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE'
@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
 
 CREATE TABLE IF NOT EXISTS paymob_transactions (
   transaction_id VARCHAR(128) PRIMARY KEY,
-  order_id VARCHAR(64) NOT NULL REFERENCES orders(id),
+  order_id VARCHAR(64) NOT NULL,
   amount_cents INT NOT NULL,
   currency VARCHAR(16) NOT NULL,
   success BOOLEAN NOT NULL,
@@ -186,6 +186,23 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   ip_address VARCHAR(64)
 );
 
+CREATE TABLE IF NOT EXISTS otp_challenges (
+  challenge_id VARCHAR(64) PRIMARY KEY,
+  username VARCHAR(64) NOT NULL REFERENCES admin_users(username),
+  otp_hash VARCHAR(128) NOT NULL,
+  expires_at BIGINT NOT NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  max_attempts INT NOT NULL DEFAULT 3,
+  is_used BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS guest_rate_limits (
+  identifier VARCHAR(128) PRIMARY KEY,
+  count INT NOT NULL,
+  first_attempt_at BIGINT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);
 CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(customer_phone);
 CREATE INDEX IF NOT EXISTS idx_reservations_status ON inventory_reservations(status, expires_at);
+

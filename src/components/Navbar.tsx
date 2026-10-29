@@ -40,10 +40,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-2xl">
       {/* Top Announcement Bar */}
-      <div className="bg-amber-500 text-slate-950 px-4 py-1.5 text-xs font-bold">
+      <div
+        className="bg-[#0051f2] text-white px-4 py-1.5 text-xs font-bold shadow-inner"
+        style={{ backgroundColor: '#0051f2' }}
+      >
         <div className="container mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Shield className="w-3.5 h-3.5 text-slate-950 shrink-0" />
+            <Shield className="w-3.5 h-3.5 text-amber-300 shrink-0" />
             <span className="truncate">
               شركة المتحدة للأدوات الكهربائية — وكيل وموزع معتمد (السويدي للكابلات، شنايدر، ABB، فينوس)
             </span>

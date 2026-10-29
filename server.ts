@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import express, { NextFunction, Request, Response } from 'express';
 import http from 'http';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { initializeDatabase } from './src/server/db/database.ts';
 import { db } from './src/server/db/store.ts';
 import { AuthService } from './src/server/services/auth.service.ts';
 import { InventoryService } from './src/server/services/inventory.service.ts';
@@ -13,11 +13,14 @@ import { PaymobService } from './src/server/services/paymob.service.ts';
 import { PricingService } from './src/server/services/pricing.service.ts';
 import { ShippingService } from './src/server/services/shipping.service.ts';
 
+
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
@@ -694,6 +697,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'HEALTHY',
     system: 'Al-Motaheda Electrical Supplies Engine',
+    database: 'PostgreSQL',
+    databaseEngine: db.pg.engineType,
     timestamp: new Date().toISOString(),
     productsCount: db.products.length,
     ordersCount: db.orders.size,
@@ -706,6 +711,11 @@ app.get('/api/health', (req, res) => {
 // 7. VITE DEV MIDDLEWARE / STATIC ASSETS
 // ==========================================
 async function startServer() {
+  console.log('🔌 [Al-Motaheda] Connecting to PostgreSQL database...');
+  await initializeDatabase();
+  await db.loadFromPostgres();
+  console.log(`✅ [Al-Motaheda] PostgreSQL connected (${db.pg.engineType}). Loaded ${db.products.length} products, ${db.orders.size} orders.`);
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
