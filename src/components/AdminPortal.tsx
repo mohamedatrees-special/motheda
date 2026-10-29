@@ -48,8 +48,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
   const [authStep, setAuthStep] = useState<'LOGIN' | 'OTP' | 'EMERGENCY'>('LOGIN');
 
   // Login form state
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('AdminMotaheda2026!');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [challengeId, setChallengeId] = useState('');
   const [otp, setOtp] = useState('');
   const [devOtp, setDevOtp] = useState('');
@@ -65,6 +65,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
   const [shippingZones, setShippingZones] = useState<DeliveryZone[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loadingData, setLoadingData] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  function showFeedback(type: 'success' | 'error', message: string) {
+    setActionFeedback({ type, message });
+    setTimeout(() => setActionFeedback(null), 4000);
+  }
 
   // New Product Modal State
   const [isAddingProduct, setIsAddingProduct] = useState(false);
@@ -204,8 +210,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
       if (!res.ok) throw new Error(data.error);
 
       loadDashboard();
+      showFeedback('success', 'تم تحديث حالة الطلب بنجاح وتوثيق العملية في سجل التدقيق.');
     } catch (err: any) {
-      alert(`خطأ: ${err.message}`);
+      showFeedback('error', `خطأ: ${err.message}`);
     }
   }
 
@@ -239,8 +246,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
       setNewTitleAr('');
       setNewSku('');
       loadDashboard();
+      showFeedback('success', 'تمت إضافة المنتج الجديد بنجاح إلى قاعدة البيانات.');
     } catch (err: any) {
-      alert(`خطأ: ${err.message}`);
+      showFeedback('error', `خطأ: ${err.message}`);
     }
   }
 
@@ -256,8 +264,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
       if (!res.ok) throw new Error(data.error);
 
       loadDashboard();
+      showFeedback('success', 'تم تحديث منطقة الشحن ورسوم التوصيل بنجاح.');
     } catch (err: any) {
-      alert(`خطأ: ${err.message}`);
+      showFeedback('error', `خطأ: ${err.message}`);
     }
   }
 
@@ -312,12 +321,28 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white"
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-amber-400 hover:text-slate-950 text-slate-200 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all min-h-[38px]"
+            title="العودة لمتجر المتحدة للعملاء"
           >
-            <X className="w-4 h-4" />
+            <ArrowRight className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">العودة للمتجر</span>
           </button>
         </div>
       </div>
+
+      {/* Global Action Feedback Banner */}
+      {actionFeedback && (
+        <div
+          className={`px-6 py-2.5 text-xs font-bold flex items-center justify-between text-white ${
+            actionFeedback.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'
+          }`}
+        >
+          <span>{actionFeedback.message}</span>
+          <button onClick={() => setActionFeedback(null)} className="text-white hover:opacity-80">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Main Container */}
       <div className="flex-1 bg-slate-900/60 overflow-y-auto p-4 sm:p-6">
@@ -372,10 +397,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
                   </div>
                 </div>
 
-                <div className="bg-slate-50 p-3 rounded-xl text-[11px] text-slate-500 space-y-0.5">
-                  <div className="font-bold text-slate-700">بيانات تجربة الإدارة المعتمدة:</div>
-                  <div>المستخدم: <code className="bg-slate-200 px-1 rounded">admin</code></div>
-                  <div>كلمة المرور: <code className="bg-slate-200 px-1 rounded">AdminMotaheda2026!</code></div>
+                <div className="bg-slate-50 p-3 rounded-xl text-[11px] text-slate-500 space-y-1 border border-slate-200">
+                  <div className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-amber-600" />
+                    <span>منطقة آمنة ومحمية بسجلات تدقيق مشددة</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    أدخل بيانات حساب الإدارة المعتمدة. سيتم إرسال رمز تحقق مؤقت (2FA OTP) تلقائياً إلى واتساب المشرف المعتمد.
+                  </p>
                 </div>
 
                 <button
@@ -492,7 +521,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
                     </label>
                     <input
                       type="text"
-                      placeholder="MOTAHEDA-EMERGENCY-2026-X99"
+                      placeholder="MOTAHEDA-XXXX-XXXX-XXXX"
                       value={recoveryCode}
                       onChange={(e) => setRecoveryCode(e.target.value)}
                       className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 font-mono"
@@ -500,8 +529,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ isOpen, onClose }) => 
                   </div>
                 </div>
 
-                <div className="bg-slate-50 p-3 rounded-xl text-[11px] text-slate-500">
-                  رمز الطوارئ المعتمد: <code className="bg-slate-200 px-1 rounded font-mono">MOTAHEDA-EMERGENCY-2026-X99</code>
+                <div className="bg-red-50 p-3 rounded-xl text-[11px] text-red-700 border border-red-200">
+                  <span className="font-bold block">ملاحظة أمنية صارمة:</span>
+                  <span>رموز الاسترداد صالحة للاستخدام لمرة واحدة فقط ويتم إتلافها فور التحقق لحماية النظام.</span>
                 </div>
 
                 <button

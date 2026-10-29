@@ -251,6 +251,40 @@ async function runTestSuite() {
     // Idempotency: Second identical transaction ID must be deduplicated (Phase 1.6)
     const duplicateResult = await PaymobService.processWebhook(mockPayload, freshValidHmac);
     assert(duplicateResult.duplicate === true, 'Regression: Duplicate webhook detected and deduplicated safely');
+
+    // Regression Test 5: Failed payment state does not mark order as paid
+    const failedPayload = JSON.parse(JSON.stringify(mockPayload));
+    failedPayload.obj.id = `tx-fail-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    failedPayload.obj.success = false;
+    const failedHmac = PaymobService.calculatePaymobHmac(failedPayload, secret);
+    const failResult = await PaymobService.processWebhook(failedPayload, failedHmac);
+    assert(failResult.success === false, 'Regression: Failed transaction recorded without confirming order');
+
+    // Regression Test 6: Webhook on cancelled order must be strictly rejected
+    const cancelledOrderResult = await OrderService.createOrder({
+      customerName: 'عميل اختبار الإلغاء',
+      customerPhone: '01099887766',
+      items: [{ productId: 'prod-elsewedy-single-wire-2-5', quantity: 1 }],
+      fulfillmentMethod: 'PICKUP',
+      branchId: 'branch-sabtiya',
+      paymentMethod: 'PAYMOB_CARD',
+    });
+    await OrderService.transitionOrderStatus(cancelledOrderResult.order.id, 'CANCELLED', 'إلغاء تجريبي', 'TEST_RUNNER');
+
+    const cancelledWebhookPayload = JSON.parse(JSON.stringify(mockPayload));
+    cancelledWebhookPayload.orderId = cancelledOrderResult.order.id;
+    cancelledWebhookPayload.obj.order.merchant_order_id = cancelledOrderResult.order.id;
+    cancelledWebhookPayload.obj.id = `tx-cancelled-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    cancelledWebhookPayload.obj.amount_cents = Math.round(cancelledOrderResult.order.finalTotal * 100);
+    const cancelledHmac = PaymobService.calculatePaymobHmac(cancelledWebhookPayload, secret);
+
+    let cancelledCaught = false;
+    try {
+      await PaymobService.processWebhook(cancelledWebhookPayload, cancelledHmac);
+    } catch (err: any) {
+      cancelledCaught = err.message.includes('لا يمكن تأكيد الدفع لطلب ملغي');
+    }
+    assert(cancelledCaught, 'Regression: Webhook rejected for cancelled order to protect stock integrity');
   }
 
   // -------------------------------------------------------------------
@@ -307,6 +341,31 @@ async function runTestSuite() {
     // Second use of the same recovery code must be rejected (Single-use enforcement)
     const emergencyLogin2 = AuthService.verifyEmergencyRecoveryCode('admin', testRecoveryCode);
     assert(emergencyLogin2.success === false, 'Regression: Single-use recovery code CANNOT be reused a second time');
+
+    // Production devOtp Redaction Test (Phase 2.2)
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const prodLoginAttempt = AuthService.initiateAdminLogin('admin', 'AdminMotaheda2026!');
+    assert(prodLoginAttempt.devOtp === undefined, 'Regression: devOtp is strictly omitted in production responses');
+    process.env.NODE_ENV = originalEnv;
+
+    // Account Lockout Protection Test (Phase 2.5: 5 failed attempts locks user)
+    const testLockoutUser = `lockout_user_${Date.now()}`;
+    const dummySalt = crypto.randomBytes(16).toString('hex');
+    const dummyHash = crypto.pbkdf2Sync('CorrectPassword123!', dummySalt, 100000, 64, 'sha512').toString('hex');
+    sqlite.prepare(`
+      INSERT INTO admin_users (id, username, password_hash, salt, full_name, role, phone, is_active, failed_login_attempts, locked_until)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0)
+    `).run(`usr-${Date.now()}`, testLockoutUser, dummyHash, dummySalt, 'مستخدم اختبار الحظر', 'SALES_AGENT', '01000000000');
+
+    for (let i = 0; i < 5; i++) {
+      AuthService.initiateAdminLogin(testLockoutUser, 'WrongPassword!');
+    }
+    const lockedAttempt = AuthService.initiateAdminLogin(testLockoutUser, 'CorrectPassword123!');
+    assert(
+      lockedAttempt.success === false && lockedAttempt.messageAr.includes('إغلاق الحساب مؤقتاً'),
+      'Regression: 5 consecutive failed login attempts trigger account lockout'
+    );
   }
 
   // -------------------------------------------------------------------

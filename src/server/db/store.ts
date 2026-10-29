@@ -20,6 +20,10 @@ import {
 import { sqlite } from './database.ts';
 
 function hashPassword(password: string, salt: string): string {
+  return crypto.pbkdf2Sync(password, salt, 220000, 64, 'sha512').toString('hex');
+}
+
+function hashPasswordLegacy(password: string, salt: string): string {
   return crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
 }
 
@@ -559,8 +563,23 @@ export class DatabaseStore {
       return { success: false, locked: true, remainingMinutes };
     }
 
-    const computed = hashPassword(passwordAttempt, user.salt);
-    const isMatch = crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(user.password_hash));
+    const computed220k = hashPassword(passwordAttempt, user.salt);
+    let isMatch = false;
+    if (user.password_hash.length === computed220k.length) {
+      isMatch = crypto.timingSafeEqual(Buffer.from(computed220k), Buffer.from(user.password_hash));
+    }
+
+    if (!isMatch) {
+      const computedLegacy = hashPasswordLegacy(passwordAttempt, user.salt);
+      if (
+        user.password_hash.length === computedLegacy.length &&
+        crypto.timingSafeEqual(Buffer.from(computedLegacy), Buffer.from(user.password_hash))
+      ) {
+        isMatch = true;
+        // Upgrade stored hash to 220,000 iterations
+        sqlite.prepare('UPDATE admin_users SET password_hash = ? WHERE username = ?').run(computed220k, username);
+      }
+    }
 
     if (isMatch) {
       // Reset failed attempts on success

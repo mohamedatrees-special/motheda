@@ -230,7 +230,7 @@ export function initializeDatabase() {
 }
 
 function hashPassword(password: string, salt: string): string {
-  return crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+  return crypto.pbkdf2Sync(password, salt, 220000, 64, 'sha512').toString('hex');
 }
 
 function seedDefaultData() {

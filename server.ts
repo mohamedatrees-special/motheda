@@ -82,7 +82,14 @@ app.get('/api/catalog/categories', (req, res) => {
 app.get('/api/catalog/products', (req, res) => {
   const { category, search, brand, minPrice, maxPrice, voltage, inStockOnly, sort } = req.query;
 
-  let filtered = db.products.filter((p) => p.isActive);
+  // Strict Phase 3 security: exclude inactive, draft, and unpublished products from public storefront
+  let filtered = db.products.filter(
+    (p) =>
+      p.isActive &&
+      (p as any).status !== 'DRAFT' &&
+      (p as any).isPublished !== false &&
+      (p as any).is_published !== 0
+  );
 
   if (category) {
     filtered = filtered.filter((p) => p.categoryId === category);
@@ -147,7 +154,12 @@ app.get('/api/catalog/products', (req, res) => {
 app.get('/api/catalog/products/:idOrSlug', (req, res) => {
   const { idOrSlug } = req.params;
   const product = db.products.find(
-    (p) => (p.id === idOrSlug || p.slug === idOrSlug) && p.isActive
+    (p) =>
+      (p.id === idOrSlug || p.slug === idOrSlug) &&
+      p.isActive &&
+      (p as any).status !== 'DRAFT' &&
+      (p as any).isPublished !== false &&
+      (p as any).is_published !== 0
   );
 
   if (!product) {
